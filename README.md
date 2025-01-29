@@ -1,1 +1,0 @@
-# thomas-god.github.io

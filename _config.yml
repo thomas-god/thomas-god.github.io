@@ -1,3 +1,14 @@
+title: Thomas Godlewski
+description: >
+  Software Engineer
+encoding: UTF-8
+domain: thomas-god.github.io
+baseurl: ""
+url: "https://thomas-god.github.io"
+github_username: thomas-god
 theme: minima
-title: Thomas-god's homepage
-description: Bookmark this to keep an eye on my project updates!
+
+minima:
+  skin: classic
+  social_links:
+    - { platform: github, user_url: https://github.com/thomas-god }
