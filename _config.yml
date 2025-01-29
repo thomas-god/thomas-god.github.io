@@ -1,6 +1,4 @@
-title: Thomas Godlewski
-description: >
-  Software Engineer
+title: WIP
 encoding: UTF-8
 domain: thomas-god.github.io
 baseurl: ""
@@ -12,3 +10,19 @@ minima:
   skin: classic
   social_links:
     - { platform: github, user_url: https://github.com/thomas-god }
+
+collections:
+  tags:
+    output: true
+
+defaults:
+  - scope:
+      path: ""
+      type: "posts"
+    values:
+      layout: "post"
+  - scope:
+      path: ""
+      type: "tags"
+    values:
+      layout: "tag"
