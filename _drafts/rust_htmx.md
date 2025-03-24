@@ -1,63 +1,104 @@
 ---
-title: "Using HTMX in a Rust application"
+title: "Trying HTMX in a Rust application"
 tags:
   - rust
   - htmx
 ---
 
-- Why trying HTMX over traditional frontend frameworks, or even vanilla JS
-- Goals of this PoC: how to integrate the view layer with the rest of a rust
-  application, testing strategies, working with websockets, using
-  tailwindcss/daisyui, etc.
-- Some difficulties and pain points
-  - choosing a templating crate
-  - no (node) build toolchain: vendoring htmx.min.js and generating css with
-    tailwind cli
-  - serving htmx content alongside a json api
-  - unit testing htmx templates, e2e testing with fantoccini
-- Some final thoughts
+## Why I wanted to test building an htmx-base application
 
-## Why i wanted to test an htmx-base application
+The last fullstack application I built used a [Svelte](https://svelte.dev/)
+client (SvelteKit with the
+[static adapter](https://svelte.dev/docs/kit/adapter-static) to be precise)
+exchanging data with a JSON-based API written in Rust. They live in the same
+repository and can be deployed simultaneously. Both were tightly coupled: there
+was no intent to expose and maintain a public API from the Rust application
+beside the Svelte client.
 
-Last fullstack application i've built: felt that using a dedicated frontend
-framework introduce some impedance mismatch. Despite the frontend being coupled
-to the backend, you have to serialize and deserialize data between the two, and
-thus maintain an api contract between the two. Even if with tools like zod it's
-not that difficult to have type-safe parsing, this duplication feels overhead.
+Still, you kinda have to maintain an implicit private API when serializing and
+deserializing data between the two. You can easily have type-safety on both
+sides (with [serde](https://serde.rs/) in Rust and [zod](https://zod.dev/) in
+Svelte) but this leads to **code duplication** and feels like an unnecessary
+impedance mismatch. When your application grows you have to invest in some
+costly and brittle end-to-end testing if you want to catch discrepancy between
+both sides of the API.
 
-This also means you also have to maintain two separate subprojects, with
-dedicated build tool chain, deployment considerations, etc.
+To circumvent this, one can use a fullstack framework like
+[SvelteKit](https://svelte.dev/docs/kit/introduction), but it forces you to use
+javascript on your backend which you might not want and/or can.
 
-For this specific application, all user interactions client-side are persisted
-on the backend, there is very little client-only interactions beside some basic
-show/hide elements or navigation. Also there is no intent to have a public
-facing API beside the frontend application.
+In this context, [htmx](https://htmx.org/) appealed to me as it's a
+language-agnostic way of building an web application on top of HTML: all you
+have to serve to your clients are plain HTML files with some custom htmx
+attributes. Instead of serializing data for you client, you can instead send
+HTML fragment that can replace part of a page to give the same interactivity you
+would have using a javascript framework.
+
+The implicit private API disappears as you are directly building your htmx
+fragment from your business types, and so the need for end-to-end testing to
+catch API discrepancies (more on that later).
+
+<!-- In this application, most user interactions where persisted on the backend and
+client-only interactions were limited to some basic show/hide elements of
+navigation. -->
 
 ## Goals of this proof of concept/toy project
 
+In no particular order, these were the points I wanted to explore and test with
+this proof of concept:
+
 - how to integrate an htxm templating/view layer in a rust application without
-  introducing coupling with the business logic/layer
+  introducing coupling with the business logic/layer,
 - how to expose a JSON-based API alongside the htmx-based application, without
-  duplicating code
-- using tailwindcss/daisyui in the generated html
-- doing websocket with htmx
+  duplicating code,
+- how to integrate [taillwindcss](https://tailwindcss.com/) and
+  [daisyui](https://daisyui.com/),
+- how to do websocket with htmx,
 - what testing strategies to use
-- overall dx compared to popular js-based framework (hot reload in particular)
+- overall developer experience (DX) compared to popular js-based framework (hot
+  reload in particular)
 
-Basic todos application and chat (for the websocket part).
+The proof of concept consists in a basic CRUD todo application and a live chat
+to test the WebSocket part. You can find the repository with the final code
+[here](https://github.com/thomas-god/poc-rust-htmx).
 
-## Lessons learned
+## Some technical decisions
 
 - [Available templating crates](#available-templating-crates)
 - [Vendoring htmx.min.js and tailwind css](#vendoring-htmxminjs-and-tailwind-css)
-- [Content negotiation to serve json alongside htmx](#content-negotiation-to-serve-json-alongside-htmx)
+- [Serving a JSON API alongside htmx](#serving-a-json-api-alongside-htmx)
 - [WebSocket + htmx](#websocket--htmx)
 - [Testing strategy](#testing-strategy)
-- [Changes on how to think when building a client/web page/application](#changes-on-how-to-think-when-building-a-clientweb-pageapplication)
 
-### Available templating crates
+### Templating crate
 
-### Vendoring htmx.min.js and tailwind css
+While you could generate your htmx fragments by hand using standard string
+formatting, it is
+[advised to use a templating engine](https://htmx.org/essays/web-security-basics-with-htmx/#always-use-an-auto-escaping-template-engine)
+to prevent common XSS attacks.
+
+From the available [options](https://www.arewewebyet.org/topics/templating/) I
+chose [maud](https://maud.lambda.xyz/) as it seems to have the best ergonomics
+regarding type safety. You can easily define component-like fragments for
+reusability.
+
+```rust
+pub fn todos_list_view(todos: &[Todo]) -> Markup {
+    html! {
+        ul.list.bg-base-100.rounded-box.shadow-md.m-6 id="todos-list" {
+            @for todo in todos {
+                (todo_view(todo)) /// Separate a single todo view from the list of all todos
+            }
+        }
+    }
+}
+
+pub fn todo_view(todo: &Todo) -> Markup {
+    /// Fragment for a single todo
+}
+```
+
+### Vendoring htmx.min.js and Tailwind CSS
 
 The htmx doc explicitly [advises](https://htmx.org/docs/#download-a-copy) to
 vendor the htmx source code directly within your project. This plays nicely when
@@ -73,7 +114,7 @@ unlike for the htmx source code, I chose not to commit this file but instead
 generate it during the build process. The tailwind cli also provides hot reload
 for you styles when developing.
 
-### Content negotiation to serve json alongside htmx
+### Serving a JSON API alongside htmx
 
 We can use standard
 [content negotiation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation)
@@ -145,8 +186,48 @@ representation (`api/json/todo` and `/todo` for instance).
 
 ### WebSocket + htmx
 
+The [Web Socket extension](https://htmx.org/extensions/ws/) is pretty
+straightforward to use and what I though would be one of the hardest point of
+the PoC was eventless.
+
 ### Testing strategy
 
-### Changes on how to think when building a client/web page/application
+Testing was probably one of the less ergonomic part of using htmx. Since your
+application only generates HTML fragments, writing tests for those fragments is
+limited to basic behavior like "is there the expected number of elements in this
+list ?", "does this button point to the correct action/URL ?", etc.
+
+```rust
+#[test]
+fn test_view_done_todo() {
+    let todo = Todo {
+        content: "done todo".to_owned(),
+        done: true,
+        id: 0,
+    };
+    let fragment = Html::parse_fragment(&todo_view(&todo).into_string());
+    let selector = Selector::parse("span").unwrap();
+
+    let span = fragment
+        .select(&selector)
+        .find(|el| el.inner_html() == "done todo")
+        .expect("span should be present");
+
+    // Basic assertion on CSS class
+    assert!(span.value().attr("class").unwrap().contains("line-through"));
+}
+```
+
+If you want to test more complex behavior you pretty fast have to write
+end-to-end tests, even for behavior scoped to a single component. To write those
+tests I used the [fantoccini](https://github.com/jonhoo/fantoccini) crate that
+allows you programmatically interact and run assertions with a headless web
+browser.
+
+Testing was the biggest letdown of using htmx, especially compared to the
+excellent options available in the javascript world like
+[testing-library](https://testing-library.com/).
 
 ## Some final thoughts
+
+### A word on locality
