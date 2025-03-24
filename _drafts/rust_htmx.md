@@ -59,7 +59,89 @@ Basic todos application and chat (for the websocket part).
 
 ### Vendoring htmx.min.js and tailwind css
 
+The htmx doc explicitly [advises](https://htmx.org/docs/#download-a-copy) to
+vendor the htmx source code directly within your project. This plays nicely when
+using a non JS-based backend as you don't have to add another package manager
+and/or build step.
+
+If using tailwindcss/daisyui to style your application, you can use the same
+strategy with the
+[tailwind CLI](https://tailwindcss.com/docs/installation/tailwind-cli) (and
+[daysui](https://daisyui.com/docs/install/standalone/)) to generate an
+`output.css` file that contains only the class you're actually using. Though
+unlike for the htmx source code, I chose not to commit this file but instead
+generate it during the build process. The tailwind cli also provides hot reload
+for you styles when developing.
+
 ### Content negotiation to serve json alongside htmx
+
+We can use standard
+[content negotiation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation)
+to choose what representation to send back to the client (htmx or JSON) based on
+the `Accept` header of the request.
+
+```rust
+pub async fn create_todo(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    ContentNegotiator(payload): ContentNegotiator<CreateTodoRequest>,
+) -> impl IntoResponse {
+    let mut state = state.write().await;
+    let todo = state.todos.add_todo(&content);
+
+    // Use the request's Accept header to determine response format
+    match headers.get("Accept").and_then(|h| h.to_str().ok()) {
+        Some("application/json") => Json(todo).into_response(),
+        _ => todo_view(todo).into_response(), // Matching htmx template
+    }
+}
+```
+
+We can use the same strategy to extract data from different representation in
+the request's body. For instance for a `POST /todo` route, we can either receive
+the new todo content as JSON, or as a xxx-form-urlencoded. We can write an axum
+extractor that abstract away this handling, and that allows having a single
+handler for both.
+
+```rust
+pub struct ContentNegotiator<T>(pub T);
+
+impl<S, T> FromRequest<S> for ContentNegotiator<T>
+where
+    S: Send + Sync,
+    T: for<'de> Deserialize<'de> + Send,
+{
+    type Rejection = StatusCode;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let content_type = req
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        // Check content type to determine how to parse
+        if content_type.starts_with("application/json") {
+            // Parse as JSON
+            let Json(payload) = Json::<T>::from_request(req, state)
+                .await
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+            return Ok(ContentNegotiator(payload));
+        }
+
+        // Default to form data
+        let Form(payload) = Form::<T>::from_request(req, state)
+            .await
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+        Ok(ContentNegotiator(payload))
+    }
+}
+```
+
+An alternative to content negotiation would be to maintain one route per
+representation (`api/json/todo` and `/todo` for instance).
 
 ### WebSocket + htmx
 
